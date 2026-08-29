@@ -1,6 +1,6 @@
 # s12ryt-ssh Authentication Server
 
-此目錄提供 Node.js 22 身分驗證與代理服務。最高管理員透過 Telegram Bot 管理子帳號、S3/MySQL/PostgreSQL connection、operation grants、裝置 session 與稽核；Windows GUI 的「登入校驗」模式只取得短期 session，所有 S3/SQL 操作都由服務端代理。
+此倉庫提供 Node.js 22 身分驗證與代理服務，是 [s12ryt-ssh](https://github.com/s12ryt/s12ryt-ssh) Windows 桌面 GUI 的配套服務。最高管理員透過 Telegram Bot 管理子帳號、S3/MySQL/PostgreSQL connection、operation grants、裝置 session 與稽核；Windows GUI 的「登入校驗」模式只取得短期 session，所有 S3/SQL 操作都由服務端代理。
 
 ## 安全邊界
 
@@ -24,7 +24,8 @@ Telegram 的私聊訊息仍會先經過 Telegram 平台。Bot 會盡力刪除 co
 ## 安裝與啟動
 
 ```powershell
-Set-Location server
+git clone https://github.com/s12ryt/s12ryt-ssh-auth-server.git
+Set-Location s12ryt-ssh-auth-server
 npm ci
 Copy-Item .env.example .env
 ```
