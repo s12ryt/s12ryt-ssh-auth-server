@@ -102,6 +102,32 @@ const migrations: Migration[] = [
       );
     `,
   },
+  {
+    version: 2,
+    sql: `
+      ALTER TABLE accounts
+        ADD COLUMN ssh_enabled INTEGER NOT NULL DEFAULT 1
+        CHECK (ssh_enabled IN (0, 1));
+
+      CREATE TABLE ssh_hosts (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        host TEXT NOT NULL,
+        port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+        username TEXT NOT NULL,
+        secret_ciphertext TEXT NOT NULL,
+        trusted_fingerprint TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE (account_id, name COLLATE NOCASE)
+      );
+      CREATE INDEX ssh_hosts_account_idx ON ssh_hosts(account_id);
+
+      ALTER TABLE audit_events
+        ADD COLUMN ssh_host_id TEXT REFERENCES ssh_hosts(id) ON DELETE SET NULL;
+    `,
+  },
 ];
 
 export class Database {

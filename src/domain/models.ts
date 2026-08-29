@@ -12,6 +12,7 @@ export interface Account {
   id: string;
   username: string;
   enabled: boolean;
+  sshEnabled: boolean;
   deviceLimit: number;
   createdAt: number;
   updatedAt: number;
@@ -120,6 +121,7 @@ export interface AuditEvent {
   ipAddress?: string;
   action: string;
   connectionId?: string;
+  sshHostId?: string;
   success: boolean;
   durationMs: number;
   rowsCount?: number;
@@ -127,4 +129,23 @@ export interface AuditEvent {
   statementHash?: string;
   statementType?: string;
   errorCode?: string;
+}
+
+export interface SSHHostSecret {
+  password: string;
+  privateKey: string;
+  keyPassphrase: string;
+}
+
+export interface SSHHostRecord {
+  id: string;
+  accountId: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  secretCiphertext: string;
+  trustedFingerprint: string;
+  createdAt: number;
+  updatedAt: number;
 }
