@@ -11,6 +11,7 @@ import type {
   Principal,
   SessionSummary,
   SessionWithAccount,
+  SSHHostRecord,
   StoredAccount,
 } from "../domain/models.js";
 import {
@@ -48,6 +49,7 @@ function accountFromRow(row: Record<string, SQLOutputValue>): StoredAccount {
     username: stringValue(row.username),
     passwordHash: stringValue(row.password_hash),
     enabled: numberValue(row.enabled) === 1,
+    sshEnabled: numberValue(row.ssh_enabled) === 1,
     deviceLimit: numberValue(row.device_limit),
     createdAt: numberValue(row.created_at),
     updatedAt: numberValue(row.updated_at),
@@ -59,9 +61,25 @@ function publicAccount(account: StoredAccount): Account {
     id: account.id,
     username: account.username,
     enabled: account.enabled,
+    sshEnabled: account.sshEnabled,
     deviceLimit: account.deviceLimit,
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
+  };
+}
+
+function sshHostFromRow(row: Record<string, SQLOutputValue>): SSHHostRecord {
+  return {
+    id: stringValue(row.id),
+    accountId: stringValue(row.account_id),
+    name: stringValue(row.name),
+    host: stringValue(row.host),
+    port: numberValue(row.port),
+    username: stringValue(row.username),
+    secretCiphertext: stringValue(row.secret_ciphertext),
+    trustedFingerprint: stringValue(row.trusted_fingerprint),
+    createdAt: numberValue(row.created_at),
+    updatedAt: numberValue(row.updated_at),
   };
 }
 
@@ -103,14 +121,16 @@ export class SqliteRepository {
       this.database
         .prepare(
           `INSERT INTO accounts(
-            id, username, password_hash, enabled, device_limit, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            id, username, password_hash, enabled, ssh_enabled, device_limit,
+            created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           account.id,
           account.username,
           account.passwordHash,
           account.enabled ? 1 : 0,
+          account.sshEnabled ? 1 : 0,
           account.deviceLimit,
           account.createdAt,
           account.updatedAt,
@@ -171,6 +191,17 @@ export class SqliteRepository {
         "UPDATE accounts SET device_limit = ?, updated_at = ? WHERE id = ?",
       )
       .run(deviceLimit, now, id);
+    if (result.changes === 0) {
+      throw new NotFoundError("account");
+    }
+  }
+
+  setAccountSSHEnabled(id: string, sshEnabled: boolean, now: number): void {
+    const result = this.database
+      .prepare(
+        "UPDATE accounts SET ssh_enabled = ?, updated_at = ? WHERE id = ?",
+      )
+      .run(sshEnabled ? 1 : 0, now, id);
     if (result.changes === 0) {
       throw new NotFoundError("account");
     }
@@ -266,6 +297,101 @@ export class SqliteRepository {
       .run(id);
     if (result.changes === 0) {
       throw new NotFoundError("connection");
+    }
+  }
+
+  createSSHHost(record: SSHHostRecord): SSHHostRecord {
+    try {
+      this.database
+        .prepare(
+          `INSERT INTO ssh_hosts(
+            id, account_id, name, host, port, username, secret_ciphertext,
+            trusted_fingerprint, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          record.id,
+          record.accountId,
+          record.name,
+          record.host,
+          record.port,
+          record.username,
+          record.secretCiphertext,
+          record.trustedFingerprint,
+          record.createdAt,
+          record.updatedAt,
+        );
+      return record;
+    } catch (error) {
+      if (String(error).includes("UNIQUE")) {
+        throw new ConflictError("ssh host name already exists");
+      }
+      throw error;
+    }
+  }
+
+  updateSSHHost(record: SSHHostRecord): SSHHostRecord {
+    const result = this.database
+      .prepare(
+        `UPDATE ssh_hosts
+         SET name = ?, host = ?, port = ?, username = ?, secret_ciphertext = ?,
+             trusted_fingerprint = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        record.name,
+        record.host,
+        record.port,
+        record.username,
+        record.secretCiphertext,
+        record.trustedFingerprint,
+        record.updatedAt,
+        record.id,
+      );
+    if (result.changes === 0) {
+      throw new NotFoundError("ssh host");
+    }
+    return record;
+  }
+
+  findSSHHost(id: string): SSHHostRecord | undefined {
+    const row = this.database
+      .prepare("SELECT * FROM ssh_hosts WHERE id = ?")
+      .get(id);
+    return row ? sshHostFromRow(row) : undefined;
+  }
+
+  listSSHHosts(accountId: string): SSHHostRecord[] {
+    return this.database
+      .prepare("SELECT * FROM ssh_hosts WHERE account_id = ? ORDER BY name")
+      .all(accountId)
+      .map((row) => sshHostFromRow(row));
+  }
+
+  countSSHHosts(accountId: string): number {
+    const row = this.database
+      .prepare("SELECT COUNT(*) AS count FROM ssh_hosts WHERE account_id = ?")
+      .get(accountId) as { count: number };
+    return Number(row.count);
+  }
+
+  setSSHHostFingerprint(id: string, fingerprint: string, now: number): void {
+    const result = this.database
+      .prepare(
+        "UPDATE ssh_hosts SET trusted_fingerprint = ?, updated_at = ? WHERE id = ?",
+      )
+      .run(fingerprint, now, id);
+    if (result.changes === 0) {
+      throw new NotFoundError("ssh host");
+    }
+  }
+
+  deleteSSHHost(id: string): void {
+    const result = this.database
+      .prepare("DELETE FROM ssh_hosts WHERE id = ?")
+      .run(id);
+    if (result.changes === 0) {
+      throw new NotFoundError("ssh host");
     }
   }
 
@@ -559,9 +685,9 @@ export class SqliteRepository {
       .prepare(
         `INSERT INTO audit_events(
           id, occurred_at, account_id, session_id, device_id, ip_address, action,
-          connection_id, success, duration_ms, rows_count, bytes_count,
+          connection_id, ssh_host_id, success, duration_ms, rows_count, bytes_count,
           statement_hash, statement_type, error_code
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         event.id,
@@ -572,6 +698,7 @@ export class SqliteRepository {
         event.ipAddress ?? null,
         event.action,
         event.connectionId ?? null,
+        event.sshHostId ?? null,
         event.success ? 1 : 0,
         event.durationMs,
         event.rowsCount ?? null,

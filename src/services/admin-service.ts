@@ -64,6 +64,7 @@ export class AdminService {
       username: normalizedUsername,
       passwordHash: await hashPassword(password),
       enabled: true,
+      sshEnabled: true,
       deviceLimit,
       createdAt: now,
       updatedAt: now,
@@ -99,6 +100,10 @@ export class AdminService {
       throw new Error("device limit must be between 1 and 100");
     }
     this.repository.setAccountDeviceLimit(accountId, limit, this.#clock());
+  }
+
+  setAccountSSHEnabled(accountId: string, sshEnabled: boolean): void {
+    this.repository.setAccountSSHEnabled(accountId, sshEnabled, this.#clock());
   }
 
   deleteAccount(accountId: string): void {
