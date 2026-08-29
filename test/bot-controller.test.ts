@@ -329,6 +329,81 @@ test("Grant and connection test commands use existing services", async () => {
   }
 });
 
+test("SSH account switches toggle ssh access and surface state in listings", async () => {
+  const fixture = createFixture();
+  try {
+    const created = await fixture.controller.handle({
+      telegramUserId: 1001,
+      chatType: "private",
+      text: "/account_create operator",
+    });
+    assert.match(created[0]?.text ?? "", /operator/);
+    const accountId = fixture.admin.listAccounts()[0]?.id ?? "";
+    assert.equal(fixture.admin.listAccounts()[0]?.sshEnabled, true);
+
+    const disabled = await fixture.controller.handle({
+      telegramUserId: 1001,
+      chatType: "private",
+      text: `/ssh_disable ${accountId}`,
+    });
+    assert.match(disabled[0]?.text ?? "", /updated/i);
+    assert.equal(fixture.admin.listAccounts()[0]?.sshEnabled, false);
+
+    const listed = await fixture.controller.handle({
+      telegramUserId: 1001,
+      chatType: "private",
+      callbackData: "menu:accounts",
+    });
+    assert.match(listed[0]?.text ?? "", /operator \| [^|]+\| [^|]+\| ssh=off/);
+
+    const enabled = await fixture.controller.handle({
+      telegramUserId: 1001,
+      chatType: "private",
+      text: `/ssh_enable ${accountId}`,
+    });
+    assert.match(enabled[0]?.text ?? "", /updated/i);
+    assert.equal(fixture.admin.listAccounts()[0]?.sshEnabled, true);
+
+    const listedAgain = await fixture.controller.handle({
+      telegramUserId: 1001,
+      chatType: "private",
+      callbackData: "menu:accounts",
+    });
+    assert.match(listedAgain[0]?.text ?? "", /ssh=on/);
+
+    const help = await fixture.controller.handle({
+      telegramUserId: 1001,
+      chatType: "private",
+      text: "/help",
+    });
+    assert.match(help[0]?.text ?? "", /\/ssh_enable \| \/ssh_disable/);
+  } finally {
+    fixture.database.close();
+  }
+});
+
+test("SSH account switches validate arguments and unknown accounts", async () => {
+  const fixture = createFixture();
+  try {
+    const missing = await fixture.controller.handle({
+      telegramUserId: 1001,
+      chatType: "private",
+      text: "/ssh_enable",
+    });
+    assert.match(missing[0]?.text ?? "", /failed/i);
+
+    const unknown = await fixture.controller.handle({
+      telegramUserId: 1001,
+      chatType: "private",
+      text: "/ssh_enable no-such-account",
+    });
+    assert.match(unknown[0]?.text ?? "", /failed/i);
+    assert.match(unknown[0]?.text ?? "", /not found/i);
+  } finally {
+    fixture.database.close();
+  }
+});
+
 test("Telegram adapter deletes sensitive input and renders inline keyboards", async () => {
   const deleted: number[] = [];
   const sent: Array<{ text: string; options: unknown }> = [];

@@ -233,6 +233,18 @@ export class BotController {
           positiveInteger(requiredArg(args, 1, "device limit")),
         );
         return [{ text: messages[language].updated }];
+      case "/ssh_enable":
+        this.options.admin.setAccountSSHEnabled(
+          requiredArg(args, 0, "account id"),
+          true,
+        );
+        return [{ text: messages[language].updated }];
+      case "/ssh_disable":
+        this.options.admin.setAccountSSHEnabled(
+          requiredArg(args, 0, "account id"),
+          false,
+        );
+        return [{ text: messages[language].updated }];
       case "/session_list":
         return [this.listSessions(args, language)];
       case "/session_revoke":
@@ -389,7 +401,7 @@ export class BotController {
       text: accounts
         .map(
           (account) =>
-            `${account.username} | ${account.id} | ${account.enabled ? messages[language].enabled : messages[language].disabled} | ${messages[language].deviceLimit}=${account.deviceLimit}`,
+            `${account.username} | ${account.id} | ${account.enabled ? messages[language].enabled : messages[language].disabled} | ssh=${account.sshEnabled ? "on" : "off"} | ${messages[language].deviceLimit}=${account.deviceLimit}`,
         )
         .join("\n"),
     };
@@ -633,6 +645,7 @@ export class BotController {
       "/account_create <username> [device-limit]",
       "/account_list | /account_enable | /account_disable | /account_delete | /account_reset",
       "/account_devices <account-id> <limit>",
+      "/ssh_enable | /ssh_disable <account-id>",
       "/session_list <account-id> | /session_revoke <session-id> | /session_revoke_all <account-id>",
       "/connection_add_s3|mysql|postgres <name> | /connection_edit <id> <name>",
       "/connection_list | /connection_test | /connection_enable | /connection_disable | /connection_delete",
