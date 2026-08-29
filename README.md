@@ -1,15 +1,17 @@
 # s12ryt-ssh Authentication Server
 
-此倉庫提供 Node.js 22 身分驗證與代理服務，是 [s12ryt-ssh](https://github.com/s12ryt/s12ryt-ssh) Windows 桌面 GUI 的配套服務。最高管理員透過 Telegram Bot 管理子帳號、S3/MySQL/PostgreSQL connection、operation grants、裝置 session 與稽核；Windows GUI 的「登入校驗」模式只取得短期 session，所有 S3/SQL 操作都由服務端代理。
+此倉庫提供 Node.js 22 身分驗證與代理服務，是 [s12ryt-ssh](https://github.com/s12ryt/s12ryt-ssh) Windows 桌面 GUI 的配套服務。最高管理員透過 Telegram Bot 管理子帳號、S3/MySQL/PostgreSQL connection、operation grants、裝置 session 與稽核；Windows GUI 的「登入校驗」模式只取得短期 session，所有 S3/SQL 操作都由服務端代理。子帳號也可自助管理私人的 SSH 主機設定檔，登入後由服務端下發憑證、客戶端直接連線。
 
 ## 安全邊界
 
-- S3 access key、secret key、SQL user 與 password 只保存在服務端 SQLite 的 AES-256-GCM 密文中。
+- S3 access key、secret key、SQL user 與 password 只保存在服務端 SQLite 的 AES-256-GCM 密文中，且永不下發給客戶端；S3/SQL 一律由服務端代理。
+- SSH 主機的密碼、私鑰與 key passphrase 同樣以 AES-256-GCM 保存於服務端。SSH 是唯一會下發憑證的資源類型：桌面客戶端以有效 access token 經 HTTPS 取得憑證後只在記憶體使用，並對主機直接建立 SSH 連線。每次下發都會寫入稽核（只記 host id 與成敗，不含憑證內容）。
+- 撤銷 session 或關閉帳號的 SSH 開關後，後續憑證下發與 SSH API 會被拒絕；但已建立的 SSH 連線由客戶端直接持有，服務端無法主動切斷。
 - 子帳號密碼以 `scrypt` 與隨機 salt 保存，Bot 產生的密碼只顯示一次。
 - access token 是約 15 分鐘的 opaque token，只存在桌面客戶端記憶體。
 - refresh token 預設有效 30 天，每次使用即輪換；SQLite 只保存 SHA-256 hash，重用舊 token 會撤銷該 token family。
 - Windows GUI 使用 DPAPI 保存 refresh token；URL、帳號與 device ID 另存於非敏感偏好檔，密碼不落盤。
-- 稽核只保存安全 metadata。SQL 只記錄 statement hash/type，不保存完整 statement；S3 不保存 object body。
+- 稽核只保存安全 metadata。SQL 只記錄 statement hash/type，不保存完整 statement；S3 不保存 object body；SSH 只記錄 host id、操作與成敗。
 
 Telegram 的私聊訊息仍會先經過 Telegram 平台。Bot 會盡力刪除 connection wizard 中的 access key、secret key 與資料庫密碼訊息，但不能宣稱 Telegram 從未接收或保存該訊息。正式環境應使用專用、可輪換且具最小權限的 credentials。
 
@@ -107,6 +109,8 @@ Bot 只處理私聊。群組訊息會被忽略；不在 `TELEGRAM_ADMIN_IDS` 的
 /account_delete <account-id>
 /account_reset <account-id>
 /account_devices <account-id> <limit>
+/ssh_enable <account-id>
+/ssh_disable <account-id>
 
 /session_list <account-id>
 /session_revoke <session-id>
@@ -169,24 +173,42 @@ SQL connection 固定 database。`query` 在 read-only transaction 中執行並�
 
 `/grant` 會驗證 operation 是否符合 connection kind。停權帳號、撤銷 session、停用 connection 或移除 grant 後，後續代理請求會立即被拒絕。
 
+`/account_list` 會顯示每個帳號的 SSH 開關狀態（`ssh=on` 或 `ssh=off`）。`/ssh_enable` 與 `/ssh_disable` 切換帳號的 SSH 主機功能；關閉後該帳號的所有 SSH API 會回 `ssh_disabled`，GUI 也不再顯示 SSH 分頁。管理員無法查看、新增或編輯子帳號的 SSH 主機內容。
+
+## SSH 主機（子帳號自助）
+
+每個子帳號可管理自己的 SSH 主機設定檔（上限 50 台），只有該帳號看得到：
+
+- 主機欄位：名稱（帳號內唯一）、host、port（1-65535，預設 22）、username、密碼或私鑰（至少一項）、可選 key passphrase、可選 trusted fingerprint。
+- 密碼、私鑰與 key passphrase 以 AES-256-GCM 加密保存；清單與編輯回應只包含 `hasPassword`/`hasPrivateKey`/`hasKeyPassphrase` 布林值，永不回傳憑證內容。
+- 編輯時憑證欄位留空表示沿用原值。
+- host 或 port 變更時，服務端會清空 trusted fingerprint，除非同一請求提供新值；client 端會在下次連線時重新確認主機指紋。
+- 憑證下發 (`credentials` endpoint) 每次都會寫入稽核。
+
 ## REST API
 
 API prefix 為 `/api/v1`。除 login/refresh 外，所有 endpoint 都需要 `Authorization: Bearer <access-token>`。
 
-| Method   | Path                                       | 用途                                                      |
-| -------- | ------------------------------------------ | --------------------------------------------------------- |
-| `GET`    | `/healthz`                                 | Health check。                                            |
-| `POST`   | `/api/v1/auth/login`                       | 使用 `username/password/deviceId` 登入。                  |
-| `POST`   | `/api/v1/auth/refresh`                     | 使用 rotation `refreshToken/deviceId` 取得新 token pair。 |
-| `POST`   | `/api/v1/auth/logout`                      | 撤銷目前 session。                                        |
-| `GET`    | `/api/v1/resources`                        | 列出 enabled 且已指派的 connection summary，不含 secret。 |
-| `GET`    | `/api/v1/resources/:id/s3/objects?prefix=` | 列出 object。                                             |
-| `PUT`    | `/api/v1/resources/:id/s3/objects/*`       | `application/octet-stream` 串流上傳。                     |
-| `GET`    | `/api/v1/resources/:id/s3/download/*`      | 串流下載。                                                |
-| `DELETE` | `/api/v1/resources/:id/s3/objects/*`       | 刪除 object。                                             |
-| `GET`    | `/api/v1/resources/:id/sql/tables`         | 列出 table。                                              |
-| `POST`   | `/api/v1/resources/:id/sql/query`          | JSON `{statement, parameters?}` read-only query。         |
-| `POST`   | `/api/v1/resources/:id/sql/exec`           | JSON `{statement, parameters?}` 執行具副作用 SQL。        |
+| Method   | Path                                       | 用途                                                                          |
+| -------- | ------------------------------------------ | ----------------------------------------------------------------------------- |
+| `GET`    | `/healthz`                                 | Health check。                                                                |
+| `POST`   | `/api/v1/auth/login`                       | 使用 `username/password/deviceId` 登入。                                      |
+| `POST`   | `/api/v1/auth/refresh`                     | 使用 rotation `refreshToken/deviceId` 取得新 token pair。                     |
+| `POST`   | `/api/v1/auth/logout`                      | 撤銷目前 session。                                                            |
+| `GET`    | `/api/v1/resources`                        | 列出 enabled 且已指派的 connection summary 與帳號 `sshEnabled`，不含 secret。 |
+| `GET`    | `/api/v1/resources/:id/s3/objects?prefix=` | 列出 object。                                                                 |
+| `PUT`    | `/api/v1/resources/:id/s3/objects/*`       | `application/octet-stream` 串流上傳。                                         |
+| `GET`    | `/api/v1/resources/:id/s3/download/*`      | 串流下載。                                                                    |
+| `DELETE` | `/api/v1/resources/:id/s3/objects/*`       | 刪除 object。                                                                 |
+| `GET`    | `/api/v1/resources/:id/sql/tables`         | 列出 table。                                                                  |
+| `POST`   | `/api/v1/resources/:id/sql/query`          | JSON `{statement, parameters?}` read-only query。                             |
+| `POST`   | `/api/v1/resources/:id/sql/exec`           | JSON `{statement, parameters?}` 執行具副作用 SQL。                            |
+| `GET`    | `/api/v1/ssh/hosts`                        | 列出自己的 SSH 主機（只有 metadata）。                                        |
+| `POST`   | `/api/v1/ssh/hosts`                        | 新增 SSH 主機，回 201 與主機 metadata。                                       |
+| `PATCH`  | `/api/v1/ssh/hosts/:id`                    | 更新自己的 SSH 主機；憑證欄位留空表示沿用。                                   |
+| `DELETE` | `/api/v1/ssh/hosts/:id`                    | 刪除自己的 SSH 主機。                                                         |
+| `GET`    | `/api/v1/ssh/hosts/:id/credentials`        | 下發該主機的完整憑證（稽核）。                                                |
+| `PUT`    | `/api/v1/ssh/hosts/:id/fingerprint`        | `{fingerprint}` 更新 trusted fingerprint。                                    |
 
 API 錯誤使用 `{ "error": { "code": "...", "message": "..." } }`。resource response 只包含 connection ID、名稱、kind、enabled 與 operations。
 
@@ -197,13 +219,13 @@ API 錯誤使用 `{ "error": { "code": "...", "message": "..." } }`。resource r
 3. 登入成功後 GUI 只顯示已指派且 enabled 的 S3/SQL connection。
 4. 各操作按鈕只在對應 grant 存在時顯示；服務端仍會再次授權，不能靠修改客戶端繞過。
 5. 可用保存的 DPAPI refresh token 恢復 session；refresh 每次使用都會輪換。
-6. 遠端 workspace 不顯示 SSH，也不提供 connection secret 編輯欄位。
+6. 帳號 SSH 開關開啟時，遠端 workspace 會顯示 SSH 分頁，可管理並連線自己的 SSH 主機；S3/SQL connection secret 仍不可查看或修改。
 
 密碼永不保存。`remote-preferences.json` 只保存 URL、帳號與隨機 device ID；refresh token 保存在既有 Windows DPAPI securestore 的獨立 namespace。
 
 ## 稽核與資料保存
 
-SQLite 稽核包含時間、帳號/session/device/IP、operation、connection、成功/失敗、耗時，以及可用的 rows/bytes。SQL 僅保存 statement SHA-256 hash與 type；S3 不保存 object body。
+SQLite 稽核包含時間、帳號/session/device/IP、operation、connection、成功/失敗、耗時，以及可用的 rows/bytes。SQL 僅保存 statement SHA-256 hash與 type；S3 不保存 object body；SSH 操作只記錄 host id（`ssh_host_id`）、action（`ssh.host.create`/`update`/`fingerprint`/`delete`/`credentials`）與成敗，不保存任何憑證內容。
 
 預設保存 90 天。runtime 每日依 `AUDIT_RETENTION_DAYS` 清理；若需外部合規備份，應在不擴張敏感欄位的前提下另行匯出。
 
