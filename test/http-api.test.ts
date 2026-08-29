@@ -15,6 +15,7 @@ import { Database } from "../src/db/database.js";
 import { SqliteRepository } from "../src/repository/sqlite-repository.js";
 import { AdminService } from "../src/services/admin-service.js";
 import { AuthService } from "../src/services/auth-service.js";
+import { SSHHostService } from "../src/services/ssh-host-service.js";
 
 class FakeS3Gateway implements S3Gateway {
   listedPrefixes: string[] = [];
@@ -123,6 +124,7 @@ async function createFixture() {
     auth,
     admin,
     proxy,
+    ssh: new SSHHostService(repository, Buffer.alloc(32, 8), { maxHosts: 50 }),
     allowInsecureHttp: false,
     trustedProxies: [],
     loginRateLimit: 100,

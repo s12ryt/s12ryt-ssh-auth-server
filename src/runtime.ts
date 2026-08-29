@@ -12,6 +12,7 @@ import { ProxyService } from "./proxy/proxy-service.js";
 import { SqliteRepository } from "./repository/sqlite-repository.js";
 import { AdminService } from "./services/admin-service.js";
 import { AuthService } from "./services/auth-service.js";
+import { SSHHostService } from "./services/ssh-host-service.js";
 
 const dayInMilliseconds = 24 * 60 * 60 * 1000;
 const defaultAuditIntervalMilliseconds = dayInMilliseconds;
@@ -43,6 +44,7 @@ export interface RuntimeDependencies {
   admin: AdminService;
   auth: AuthService;
   proxy: ProxyService;
+  ssh: SSHHostService;
   http: FastifyInstance;
   bot: BotRunner;
 }
@@ -53,6 +55,7 @@ export class Runtime implements RuntimeDependencies {
   readonly admin: AdminService;
   readonly auth: AuthService;
   readonly proxy: ProxyService;
+  readonly ssh: SSHHostService;
   readonly http: FastifyInstance;
   readonly bot: BotRunner;
 
@@ -92,6 +95,7 @@ export class Runtime implements RuntimeDependencies {
     this.admin = dependencies.admin;
     this.auth = dependencies.auth;
     this.proxy = dependencies.proxy;
+    this.ssh = dependencies.ssh;
     this.http = dependencies.http;
     this.bot = dependencies.bot;
   }
@@ -239,10 +243,15 @@ export async function createRuntime(
         clock,
       },
     );
+    const ssh = new SSHHostService(repository, config.masterKey, {
+      maxHosts: 50,
+      clock,
+    });
     const http = await (options.httpBuilder ?? buildHttpApp)({
       auth,
       admin,
       proxy,
+      ssh,
       allowInsecureHttp: config.allowInsecureHttp,
       trustedProxies: config.trustedProxies,
       loginRateLimit: config.loginRateLimit,
@@ -259,7 +268,7 @@ export async function createRuntime(
     );
     return new Runtime(
       config,
-      { database, repository, admin, auth, proxy, http, bot },
+      { database, repository, admin, auth, proxy, ssh, http, bot },
       options,
     );
   } catch (error) {

@@ -6,11 +6,14 @@ import { InvalidTokenError, ServiceError } from "../errors.js";
 import { ProxyService } from "../proxy/proxy-service.js";
 import { AdminService } from "../services/admin-service.js";
 import { AuthService } from "../services/auth-service.js";
+import type { SSHHostInput } from "../services/ssh-host-service.js";
+import { SSHHostService } from "../services/ssh-host-service.js";
 
 export interface HttpAppOptions {
   auth: AuthService;
   admin: AdminService;
   proxy: ProxyService;
+  ssh: SSHHostService;
   allowInsecureHttp: boolean;
   trustedProxies: string[];
   loginRateLimit: number;
@@ -45,6 +48,31 @@ const sqlSchema = {
   properties: {
     statement: { type: "string", minLength: 1, maxLength: 1_000_000 },
     parameters: { type: "array", maxItems: 10_000 },
+  },
+} as const;
+
+const sshHostBodySchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["name", "host", "username"],
+  properties: {
+    name: { type: "string", minLength: 1, maxLength: 100 },
+    host: { type: "string", minLength: 1, maxLength: 255 },
+    port: { type: "integer", minimum: 1, maximum: 65535, default: 22 },
+    username: { type: "string", minLength: 1, maxLength: 64 },
+    password: { type: "string", maxLength: 512 },
+    privateKey: { type: "string", maxLength: 65536 },
+    keyPassphrase: { type: "string", maxLength: 512 },
+    trustedFingerprint: { type: "string", maxLength: 128 },
+  },
+} as const;
+
+const sshFingerprintSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["fingerprint"],
+  properties: {
+    fingerprint: { type: "string", minLength: 1, maxLength: 128 },
   },
 } as const;
 
@@ -97,6 +125,10 @@ function operationContext(
   connectionId: string,
 ) {
   return { principal: identity, connectionId, ipAddress: request.ip };
+}
+
+function sshContext(identity: Principal, request: FastifyRequest) {
+  return { principal: identity, ipAddress: request.ip };
 }
 
 export async function buildHttpApp(
@@ -196,6 +228,7 @@ export async function buildHttpApp(
       resources: options.admin
         .listAssignedConnections(identity.accountId)
         .filter((item) => item.enabled),
+      sshEnabled: options.ssh.accessEnabled(identity.accountId),
     };
   });
 
@@ -302,6 +335,75 @@ export async function buildHttpApp(
       },
     );
   }
+
+  app.get("/api/v1/ssh/hosts", async (request) => {
+    const identity = await principal(request, options.auth);
+    return { hosts: options.ssh.listHosts(identity.accountId) };
+  });
+
+  app.post<{ Body: SSHHostInput }>(
+    "/api/v1/ssh/hosts",
+    { schema: { body: sshHostBodySchema } },
+    async (request, reply) => {
+      const identity = await principal(request, options.auth);
+      const host = options.ssh.createHost(
+        sshContext(identity, request),
+        request.body,
+      );
+      return reply.status(201).send(host);
+    },
+  );
+
+  app.patch<{ Params: { hostId: string }; Body: SSHHostInput }>(
+    "/api/v1/ssh/hosts/:hostId",
+    { schema: { body: sshHostBodySchema } },
+    async (request, reply) => {
+      const identity = await principal(request, options.auth);
+      const host = options.ssh.updateHost(
+        sshContext(identity, request),
+        request.params.hostId,
+        request.body,
+      );
+      return reply.status(200).send(host);
+    },
+  );
+
+  app.delete<{ Params: { hostId: string } }>(
+    "/api/v1/ssh/hosts/:hostId",
+    async (request, reply) => {
+      const identity = await principal(request, options.auth);
+      options.ssh.deleteHost(
+        sshContext(identity, request),
+        request.params.hostId,
+      );
+      return reply.status(204).send();
+    },
+  );
+
+  app.get<{ Params: { hostId: string } }>(
+    "/api/v1/ssh/hosts/:hostId/credentials",
+    async (request) => {
+      const identity = await principal(request, options.auth);
+      return options.ssh.getCredentials(
+        sshContext(identity, request),
+        request.params.hostId,
+      );
+    },
+  );
+
+  app.put<{ Params: { hostId: string }; Body: { fingerprint: string } }>(
+    "/api/v1/ssh/hosts/:hostId/fingerprint",
+    { schema: { body: sshFingerprintSchema } },
+    async (request, reply) => {
+      const identity = await principal(request, options.auth);
+      options.ssh.setFingerprint(
+        sshContext(identity, request),
+        request.params.hostId,
+        request.body.fingerprint,
+      );
+      return reply.status(204).send();
+    },
+  );
 
   return app;
 }
