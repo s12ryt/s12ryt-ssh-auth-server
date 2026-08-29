@@ -1,0 +1,18 @@
+# Environment and runtime state
+.env
+/data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+
+# Build output and dependencies
+node_modules/
+dist/
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+Desktop.ini
