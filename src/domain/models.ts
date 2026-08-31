@@ -137,6 +137,39 @@ export interface SSHHostSecret {
   keyPassphrase: string;
 }
 
+export type SSHAuthMethod = "password" | "private_key";
+
+export type SSHTerminalFont = "builtin-mono" | "system-mono";
+
+export interface SSHTerminalAppearance {
+  font: SSHTerminalFont;
+  fontSize: number;
+  foreground: string;
+  background: string;
+}
+
+export interface SSHWorkspacePreferencesRecord {
+  accountId: string;
+  terminalAppearance: SSHTerminalAppearance;
+  version: number;
+  updatedAt: number;
+}
+
+export interface SSHConnectionSettings {
+  tcpTimeoutMs: number;
+  sshHandshakeTimeoutMs: number;
+  ptyTimeoutMs: number;
+  keepaliveIntervalMs: number;
+  failureCount: number;
+  idleTimeoutMs: number;
+  compression: boolean;
+  startupCommand: string;
+  initialDirectory: string;
+  environment: Record<string, string>;
+  autoReconnect: boolean;
+  terminalAppearance?: Partial<SSHTerminalAppearance>;
+}
+
 export interface SSHHostRecord {
   id: string;
   accountId: string;
@@ -146,6 +179,91 @@ export interface SSHHostRecord {
   username: string;
   secretCiphertext: string;
   trustedFingerprint: string;
+  enabled: boolean;
+  favorite: boolean;
+  groupPath: string;
+  tags: string[];
+  sortOrder: number;
+  authMethod: SSHAuthMethod;
+  settings: SSHConnectionSettings;
+  version: number;
   createdAt: number;
   updatedAt: number;
+}
+
+export type SSHHostFingerprintSource = "tofu" | "manual";
+
+export interface SSHHostFingerprintRecord {
+  id: string;
+  accountId: string;
+  hostId: string;
+  algorithm: string;
+  fingerprint: string;
+  source: SSHHostFingerprintSource;
+  active: boolean;
+  observedAt: number;
+  retiredAt: number | null;
+}
+
+export type SSHTunnelType = "local" | "remote" | "dynamic_socks";
+
+export interface SSHTunnelRecord {
+  id: string;
+  accountId: string;
+  name: string;
+  hostId: string;
+  type: SSHTunnelType;
+  listenHost: string;
+  listenPort: number;
+  targetHost: string;
+  targetPort: number;
+  enabled: boolean;
+  autoStart: boolean;
+  running: boolean;
+  trafficUpBytes: number;
+  trafficDownBytes: number;
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SSHCommandSnippetRecord {
+  id: string;
+  accountId: string;
+  name: string;
+  command: string;
+  variables: string[];
+  secretCiphertext: string;
+  enabled: boolean;
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SSHKeyIdentityRecord {
+  id: string;
+  accountId: string;
+  name: string;
+  publicKey: string;
+  fingerprint: string;
+  secretCiphertext: string;
+  enabled: boolean;
+  version: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type SSHSessionHistoryStatus =
+  "connecting" | "connected" | "failed" | "closed";
+
+export interface SSHSessionHistoryRecord {
+  id: string;
+  accountId: string;
+  hostId: string | null;
+  hostName: string;
+  status: SSHSessionHistoryStatus;
+  latencyMs: number;
+  errorMessage: string;
+  startedAt: number;
+  endedAt: number | null;
 }

@@ -28,6 +28,12 @@ test("database migrations are atomic and idempotent", () => {
       "schema_migrations",
       "sessions",
       "ssh_hosts",
+      "ssh_host_fingerprints",
+      "ssh_key_identities",
+      "ssh_session_history",
+      "ssh_snippets",
+      "ssh_tunnels",
+      "ssh_workspace_preferences",
     ]) {
       assert.equal(tables.includes(required), true, `missing ${required}`);
     }
@@ -37,13 +43,13 @@ test("database migrations are atomic and idempotent", () => {
       .prepare("SELECT version FROM schema_migrations ORDER BY version")
       .all()
       .map((row) => Number((row as { version: unknown }).version));
-    assert.deepEqual(migrations, [1, 2]);
+    assert.deepEqual(migrations, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
   } finally {
     database.close();
   }
 });
 
-test("migration 2 adds ssh host storage with account isolation", () => {
+test("migrations add SSH host storage, workspace metadata, and tunnel rules", () => {
   const database = new Database(":memory:");
   try {
     database.migrate();
@@ -61,6 +67,151 @@ test("migration 2 adds ssh host storage with account isolation", () => {
       .all()
       .map((row) => String((row as { name: unknown }).name));
     assert.equal(auditColumns.includes("ssh_host_id"), true);
+
+    const hostColumns = database
+      .raw()
+      .prepare("PRAGMA table_info(ssh_hosts)")
+      .all()
+      .map((row) => String((row as { name: unknown }).name));
+    for (const required of [
+      "enabled",
+      "favorite",
+      "group_path",
+      "tags_json",
+      "sort_order",
+      "auth_method",
+      "settings_json",
+      "version",
+    ]) {
+      assert.equal(hostColumns.includes(required), true, `missing ${required}`);
+    }
+
+    const tunnelColumns = database
+      .raw()
+      .prepare("PRAGMA table_info(ssh_tunnels)")
+      .all()
+      .map((row) => String((row as { name: unknown }).name));
+    for (const required of [
+      "account_id",
+      "host_id",
+      "type",
+      "listen_host",
+      "listen_port",
+      "target_host",
+      "target_port",
+      "enabled",
+      "auto_start",
+      "running",
+      "traffic_up_bytes",
+      "traffic_down_bytes",
+      "version",
+    ]) {
+      assert.equal(
+        tunnelColumns.includes(required),
+        true,
+        `missing ${required}`,
+      );
+    }
+
+    const snippetColumns = database
+      .raw()
+      .prepare("PRAGMA table_info(ssh_snippets)")
+      .all()
+      .map((row) => String((row as { name: unknown }).name));
+    for (const required of [
+      "account_id",
+      "name",
+      "command",
+      "variables_json",
+      "secret_ciphertext",
+      "enabled",
+      "version",
+    ]) {
+      assert.equal(
+        snippetColumns.includes(required),
+        true,
+        `missing ${required}`,
+      );
+    }
+
+    const keyColumns = database
+      .raw()
+      .prepare("PRAGMA table_info(ssh_key_identities)")
+      .all()
+      .map((row) => String((row as { name: unknown }).name));
+    for (const required of [
+      "account_id",
+      "name",
+      "public_key",
+      "fingerprint",
+      "secret_ciphertext",
+      "enabled",
+      "version",
+    ]) {
+      assert.equal(keyColumns.includes(required), true, `missing ${required}`);
+    }
+
+    const fingerprintColumns = database
+      .raw()
+      .prepare("PRAGMA table_info(ssh_host_fingerprints)")
+      .all()
+      .map((row) => String((row as { name: unknown }).name));
+    for (const required of [
+      "account_id",
+      "host_id",
+      "algorithm",
+      "fingerprint",
+      "source",
+      "active",
+      "observed_at",
+      "retired_at",
+    ]) {
+      assert.equal(
+        fingerprintColumns.includes(required),
+        true,
+        `missing ${required}`,
+      );
+    }
+
+    const historyColumns = database
+      .raw()
+      .prepare("PRAGMA table_info(ssh_session_history)")
+      .all()
+      .map((row) => String((row as { name: unknown }).name));
+    for (const required of [
+      "account_id",
+      "host_id",
+      "host_name",
+      "status",
+      "latency_ms",
+      "error_message",
+      "started_at",
+      "ended_at",
+    ]) {
+      assert.equal(
+        historyColumns.includes(required),
+        true,
+        `missing ${required}`,
+      );
+    }
+
+    const workspacePreferenceColumns = database
+      .raw()
+      .prepare("PRAGMA table_info(ssh_workspace_preferences)")
+      .all()
+      .map((row) => String((row as { name: unknown }).name));
+    for (const required of [
+      "account_id",
+      "terminal_appearance_json",
+      "version",
+      "updated_at",
+    ]) {
+      assert.equal(
+        workspacePreferenceColumns.includes(required),
+        true,
+        `missing ${required}`,
+      );
+    }
 
     database.raw().exec("PRAGMA foreign_keys = ON");
     const now = Date.now();
@@ -186,7 +337,7 @@ test("migration 2 upgrades an existing version 1 database in place", () => {
       .prepare("SELECT version FROM schema_migrations ORDER BY version")
       .all()
       .map((row) => Number((row as { version: unknown }).version));
-    assert.deepEqual(migrations, [1, 2]);
+    assert.deepEqual(migrations, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
   } finally {
     database.close();
   }
